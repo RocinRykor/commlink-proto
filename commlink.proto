@@ -1,0 +1,247 @@
+syntax = "proto3";
+
+package commlink;
+
+// ═════════════════════════════════════════════════════════════════════════════
+// COMMLINK PROTOCOL — v0.1.0
+//
+// The nervous system of the Decrypt ecosystem.
+//
+//  Decrypt is built on a principle of simplicity at scale, the idea is to break
+//  any task down into the smallest cleanest module of what works and let
+//  each node communicate exactly what it needs to achieve that task, so that
+//  that task may be monitored, automated, and improved
+//
+// Commlink is the language by which Decrypt communicates both internally between
+// modules, externally with devices and the world, and eventually with itself.
+// Every signal that moves through the ecosystem carries this envelope.
+//
+// Design principles:
+//   - Forward compatibility is paramount. The protocol only ever adds.
+//     It never removes, renames, or changes the meaning of existing fields.
+//   - The envelope is transport-agnostic. gRPC carries local signals.
+//     WebSocket carries remote and intermittent ones. The signal is the same.
+//   - Intelligence lives at the edges. The Nexus routes. It does not interpret.
+//   - Discovery is a first class primitive. The organism surfaces what it
+//     does not yet have language for.
+//   - The system is kept as clean an simplistic that it can be, design every
+//     component to be modular in nature, hot-swappable where needed
+// ═════════════════════════════════════════════════════════════════════════════
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SIGNAL — the universal envelope
+//
+// Every message in the Decrypt ecosystem carries these four fields regardless
+// of what it contains or how it travels.
+// ─────────────────────────────────────────────────────────────────────────────
+
+message Signal {
+    NodeId   source     = 1; // which node sent this signal
+    int64    created_at = 2; // unix timestamp, milliseconds
+    Priority priority   = 3; // determines delivery order and storage strategy
+    Payload  payload    = 4; // what this signal contains
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NODE IDENTITY
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A node's identity in the ecosystem.
+// Module names the signal source. Id distinguishes instances of the same type of source
+message NodeId {
+    string module = 1;
+    string id     = 2;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRIORITY
+//
+// Determines two things: delivery order and storage strategy.
+//
+//   ROUTINE  — ephemeral. Memory buffer only. Gone on nexus restart.
+//   ELEVATED — important. Memory buffer with extended window.
+//   CRITICAL — persisted to disk. Survives nexus restart.
+//
+// System critical messages need to be able to persist, in order for
+// the system so that in the event of a disruption the core communication
+// can reconnect and continue with minimal downtime
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Priority {
+    ROUTINE  = 0;
+    ELEVATED = 1;
+    CRITICAL = 2;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAYLOAD — the four primitives
+//
+//   Message   — fire and forget. Something happened.
+//   Request   — something happened and a reply is expected.
+//   Response  — the reply to a request.
+//   Discovery — a pattern was found that has no signal type yet.
+//
+// Discovery is the heart of self-improvement. It is how the organism surfaces
+// what it does not yet have language for. I don't know how it is going to work
+// yet, but is core to the identity that it needs to be designed around from the
+// very beginning. So a dedicated channel in the communication is dedicated to
+// improvement and discovery
+// ─────────────────────────────────────────────────────────────────────────────
+
+message Payload {
+    oneof kind {
+        Message   message   = 1;
+        Request   request   = 2;
+        Response  response  = 3;
+        Discovery discovery = 4;
+    }
+}
+
+// Fire and forget. No reply expected unless ack is set.
+message Message {
+    string   signal_type           = 1;
+    bytes    body                  = 2;
+    AckLevel ack                   = 3; // default NONE
+    uint64   processing_timeout_ms = 4; // 0 means no timeout
+}
+
+// Expects a response. Matched to its response by correlation_id.
+message Request {
+    string signal_type    = 1;
+    string correlation_id = 2;
+    bytes  body           = 3;
+}
+
+// The reply to a request. Matched to its request by correlation_id.
+message Response {
+    string correlation_id = 1;
+    bytes  body           = 2;
+}
+
+// A pattern observed by a Stream Node that has no signal type yet.
+// The organism decides whether to formalize it or ignore it.
+message Discovery {
+    bytes  evidence    = 1; // the raw pattern or data that triggered this
+    string context     = 2; // where it came from and what was happening
+    uint32 occurrences = 3; // how many times this pattern has been observed
+    float  confidence  = 4; // how certain the node is that this is meaningful
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ACKNOWLEDGMENT
+//
+// Opt-in. A sender requests only as much confirmation as it needs.
+//
+//   NONE      — fire and forget. Default.
+//   DELIVERED — the Nexus confirms the signal reached the stream.
+//   PROCESSED — the receiving node confirms it acted on the signal.
+//               The Nexus watches processing_timeout_ms and notifies
+//               the sender if the deadline passes without confirmation.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AckLevel {
+    NONE      = 0;
+    DELIVERED = 1;
+    PROCESSED = 2;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NODE CLASSES
+//
+//   PARTICIPANT — a standard node. Announces, sends, receives, does work.
+//   STREAM      — sits on the boundary between Commlink and the outside world.
+//                 Bridges raw input/output streams into the signal protocol.
+//                 Carries a filter layer that decides what crosses the boundary.
+//                 Filter rules is agnostic data, not code, and must be able to
+//                 update and reload without restarting the system.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum NodeClass {
+    PARTICIPANT = 0;
+    STREAM      = 1;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NODE ANNOUNCEMENT — registering with nexus
+//
+// The Nexus uses this to build the route table and broker introductions
+// between nodes that want to speak to each other.
+//
+// Nodes are self-announcing. They are not pre-registered.
+// The Nexus validates that they speak the correct protocol version
+// and accepts them into the ecosystem.
+// ─────────────────────────────────────────────────────────────────────────────
+
+message NodeAnnouncement {
+    NodeId          identity              = 1;
+    repeated string capabilities          = 2; // signal types this node emits
+    repeated string subscriptions         = 3; // signal types this node wants
+    uint64          heartbeat_interval_ms = 4; // how often to expect a pulse
+    string          protocol_version      = 5; // semver e.g. "0.1.0"
+    NodeClass       class                 = 6;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEXUS SERVICE — the central coordinator
+//
+// The Nexus maintains three things:
+//   Registry — who is connected and what do they speak
+//   Routes   — who is subscribed to what signal types
+//   Buffer   — signals waiting for a listener to appear
+//
+// The Nexus acts as coordinator and final authority. It knows the canonical version
+// and informs nodes whether an update is available on announcement.
+// If it goes down, local nodes that already know each other keep talking.
+// Remote nodes lose their anchor but reconnect when it returns.
+// The ecosystem as a whole survives.
+// ─────────────────────────────────────────────────────────────────────────────
+
+service Nexus {
+    // A node announces itself and receives acknowledgment.
+    // The Nexus registers it, updates the route table, and brokers
+    // introductions to existing nodes that speak matching signal types.
+    rpc Announce(NodeAnnouncement) returns (AnnounceResponse);
+
+    // A node sends a signal into the ecosystem.
+    // The Nexus fans it out to all subscribers.
+    // Undelivered signals enter the priority buffer.
+    rpc Send(Signal) returns (SendResponse);
+
+    // A node opens a persistent stream to receive signals.
+    // The Nexus pushes signals as they arrive.
+    // The stream stays open for the lifetime of the node.
+    rpc Listen(NodeId) returns (stream Signal);
+
+    // A node announces a clean shutdown.
+    // The Nexus removes it from the registry and notifies subscribers.
+    rpc Disconnect(NodeId) returns (DisconnectResponse);
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SERVICE MESSAGES
+// ─────────────────────────────────────────────────────────────────────────────
+
+message AnnounceResponse {
+    bool   accepted         = 1;
+    string message          = 2;
+    string current_version  = 3; // canonical protocol version
+    bool   update_available = 4; // true if node is behind current version
+}
+
+message SendResponse {
+    bool  delivered       = 1;
+    int32 recipient_count = 2; // zero means the signal entered the buffer
+}
+
+message DisconnectResponse {
+    bool acknowledged = 1;
+}
