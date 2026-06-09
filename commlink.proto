@@ -166,6 +166,7 @@ enum NodeClass {
     PARTICIPANT = 0;
     STREAM      = 1;
     AFFECT      = 2;
+    NEXUS       = 3;
 }
 
 
