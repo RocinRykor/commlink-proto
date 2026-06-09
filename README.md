@@ -8,9 +8,11 @@ The protocol definition for Commlink, the communication layer at the core of the
 
 Commlink is the nervous system of Decrypt. 
 
+It started as cimple communication layer to connect a couple different apps and standardize commands between them, but it has grown to something more akin to a language.
+
 Every signal that moves through the ecosystem, whether from a log watcher, a market tool, or home sensor, will use this language.
 
-Every node in the ecosystem will speak this language. Decrypt will operate in and on this language.
+Every node in the ecosystem will speak the same language, meaning Decrypt will operate in and on this language.
 
 The name comes from the primary communication tool Decrypt uses, an all purpose communication tool called Commlink, set in the Shadowrun universe and cyberpunk in general.
 
@@ -61,8 +63,7 @@ Everything else is downstream of that.
 
 ```
 commlink-proto/
-└── proto/
-    └── commlink.proto
+└── commlink.proto
 ```
 
 ---
